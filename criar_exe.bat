@@ -15,11 +15,11 @@ if errorlevel 1 (
 )
 
 echo [1/3] Instalando PyInstaller...
-pip install pyinstaller --quiet
+python -m pip install pyinstaller --quiet
 
 echo.
 echo [2/3] Gerando executavel...
-pyinstaller --onefile --windowed --name "GitMergeTool" --clean git_merge_tool.py
+python -m PyInstaller --onefile --windowed --name "GitMergeTool" --clean git_merge_tool.py
 
 echo.
 echo [3/3] Pronto!

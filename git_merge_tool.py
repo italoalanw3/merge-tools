@@ -238,16 +238,48 @@ class GitMergeTool:
                    style="Secondary.TButton",
                    command=self._delete_profile).pack(side=tk.LEFT)
 
-        # Source Branch
+        # Source Branch — com busca
         source_card = self._card(config_frame, "Branch de Origem (source)")
         source_card.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=(5, 0))
         source_inner = ttk.Frame(source_card, style="Card.TFrame")
         source_inner.pack(fill=tk.X, padx=10, pady=(0, 10))
 
-        self.source_combo = ttk.Combobox(source_inner,
-                                         textvariable=self.source_branch,
-                                         style="Dark.TCombobox")
-        self.source_combo.pack(fill=tk.X, expand=True)
+        # Container para entry + listbox dropdown
+        source_container = tk.Frame(source_inner, bg=COLORS["bg_card"])
+        source_container.pack(fill=tk.X, expand=True)
+
+        self.source_entry = tk.Entry(source_container,
+                                     textvariable=self.source_branch,
+                                     bg=COLORS["input_bg"], fg=COLORS["text"],
+                                     insertbackground=COLORS["text"],
+                                     font=("Segoe UI", 10), relief="flat",
+                                     bd=0, highlightthickness=1,
+                                     highlightcolor=COLORS["accent"],
+                                     highlightbackground=COLORS["border"])
+        self.source_entry.pack(fill=tk.X, ipady=6)
+
+        # Listbox dropdown (escondida por padrão)
+        self.source_listbox_frame = tk.Frame(source_container, bg=COLORS["border"])
+        self.source_listbox = tk.Listbox(self.source_listbox_frame,
+                                         bg=COLORS["input_bg"], fg=COLORS["text"],
+                                         font=("Segoe UI", 10),
+                                         selectbackground=COLORS["accent"],
+                                         selectforeground="white",
+                                         relief="flat", bd=0,
+                                         highlightthickness=0,
+                                         exportselection=False,
+                                         height=8)
+        self.source_listbox.pack(fill=tk.BOTH, expand=True, padx=1, pady=1)
+
+        # Eventos de busca
+        self.source_branch.trace_add("write", lambda *_: self._filter_source_list())
+        self.source_entry.bind("<FocusIn>", lambda e: self._show_source_list())
+        self.source_entry.bind("<FocusOut>", lambda e: self.root.after(150, self._hide_source_list))
+        self.source_entry.bind("<Down>", lambda e: self._source_list_navigate(1))
+        self.source_entry.bind("<Up>", lambda e: self._source_list_navigate(-1))
+        self.source_entry.bind("<Return>", lambda e: self._source_list_select())
+        self.source_entry.bind("<Escape>", lambda e: self._hide_source_list())
+        self.source_listbox.bind("<ButtonRelease-1>", lambda e: self._source_list_click())
 
         # ─── Target Branches — TODAS do repo com busca ───
         target_outer = self._card(main, "Branches de Destino — selecione quais vao receber o merge")
@@ -391,22 +423,24 @@ class GitMergeTool:
             return
 
         try:
-            self._log("Buscando branches do repositorio...\n", "info")
-
-            # Fetch para atualizar referências remotas
-            subprocess.run(["git", "fetch", "--all", "--prune"],
-                           cwd=repo, capture_output=True, text=True, timeout=60)
+            self._log("Buscando branches locais do repositorio...\n", "info")
 
             result = subprocess.run(
                 ["git", "branch", "-a"],
-                cwd=repo, capture_output=True, text=True, timeout=30
+                cwd=repo, capture_output=True, timeout=30,
+                encoding="utf-8", errors="replace"
             )
             if result.returncode != 0:
-                self._log(f"Erro: {result.stderr}\n", "error")
+                self._log(f"Erro: {(result.stderr or '')}\n", "error")
+                return
+
+            stdout = (result.stdout or "").strip()
+            if not stdout:
+                self._log("Nenhuma branch encontrada no repositorio.\n", "warning")
                 return
 
             branches = []
-            for line in result.stdout.strip().split("\n"):
+            for line in stdout.split("\n"):
                 branch = line.strip()
                 if branch.startswith("* "):
                     branch = branch[2:]
@@ -419,7 +453,8 @@ class GitMergeTool:
                     branches.append(branch)
 
             self.available_branches = sorted(branches, key=str.lower)
-            self.source_combo["values"] = self.available_branches
+            # Atualizar a listbox de origem (será filtrada ao digitar)
+            self._filter_source_list()
 
             # Guardar quais estavam selecionadas antes
             previously_selected = {b for b, v in self.all_branch_vars.items() if v.get()}
@@ -470,12 +505,74 @@ class GitMergeTool:
             self._branch_widgets[branch] = cb_frame
 
         self._update_status()
+        self._filter_branches()  # Aplicar visibilidade (só marcadas se sem filtro)
+
+    # ─── Source branch search helpers ──────────────────────────────
+
+    def _show_source_list(self):
+        """Mostra a listbox de branches de origem."""
+        self._filter_source_list()
+        self.source_listbox_frame.pack(fill=tk.X, pady=(2, 0))
+
+    def _hide_source_list(self):
+        """Esconde a listbox."""
+        self.source_listbox_frame.pack_forget()
+
+    def _filter_source_list(self):
+        """Filtra a listbox conforme o texto digitado."""
+        query = self.source_branch.get().lower().strip()
+        self.source_listbox.delete(0, tk.END)
+        for branch in self.available_branches:
+            if not query or query in branch.lower():
+                self.source_listbox.insert(tk.END, branch)
+
+    def _source_list_navigate(self, direction):
+        """Navega na listbox com setas."""
+        size = self.source_listbox.size()
+        if size == 0:
+            return
+        sel = self.source_listbox.curselection()
+        if sel:
+            idx = sel[0] + direction
+        else:
+            idx = 0 if direction > 0 else size - 1
+        idx = max(0, min(idx, size - 1))
+        self.source_listbox.selection_clear(0, tk.END)
+        self.source_listbox.selection_set(idx)
+        self.source_listbox.see(idx)
+
+    def _source_list_select(self):
+        """Seleciona o item atual da listbox (Enter)."""
+        sel = self.source_listbox.curselection()
+        if sel:
+            value = self.source_listbox.get(sel[0])
+            self.source_branch.set(value)
+            self._hide_source_list()
+            self.root.focus_set()
+
+    def _source_list_click(self):
+        """Seleciona o item clicado na listbox."""
+        sel = self.source_listbox.curselection()
+        if sel:
+            value = self.source_listbox.get(sel[0])
+            self.source_branch.set(value)
+            self._hide_source_list()
+            self.root.focus_set()
+
+    # ─── Target branch filter ───────────────────────────────────
 
     def _filter_branches(self):
-        """Filtra branches pelo texto de busca."""
+        """Filtra branches: sem texto mostra só marcadas, com texto filtra todas."""
         query = self.search_var.get().lower().strip()
         for branch, frame in self._branch_widgets.items():
-            if not query or query in branch.lower():
+            is_selected = self.all_branch_vars[branch].get()
+            if query:
+                # Com filtro: mostra todas que batem com a busca
+                visible = query in branch.lower()
+            else:
+                # Sem filtro: mostra apenas as marcadas
+                visible = is_selected
+            if visible:
                 frame.pack(fill=tk.X, padx=4, pady=1)
             else:
                 frame.pack_forget()
@@ -499,6 +596,10 @@ class GitMergeTool:
 
         for branch, var in self.all_branch_vars.items():
             var.set(branch in profile_branches)
+
+        # Limpar filtro e mostrar só as marcadas
+        self.search_var.set("")
+        self._filter_branches()
 
     def _update_status(self):
         """Atualiza o contador de branches selecionadas."""
@@ -525,6 +626,10 @@ class GitMergeTool:
             profile_branches = set(profile.get("target_branches", []))
             for branch, var in self.all_branch_vars.items():
                 var.set(branch in profile_branches)
+
+            # Limpar filtro e mostrar só as marcadas
+            self.search_var.set("")
+            self._filter_branches()
 
         self.config["last_profile"] = name
         save_config(self.config)
@@ -623,13 +728,28 @@ class GitMergeTool:
         try:
             result = subprocess.run(
                 ["git"] + args,
-                cwd=repo, capture_output=True, text=True, timeout=120
+                cwd=repo, capture_output=True, timeout=120,
+                encoding="utf-8", errors="replace"
             )
-            return result.returncode == 0, result.stdout.strip(), result.stderr.strip()
+            stdout = (result.stdout or "").strip()
+            stderr = (result.stderr or "").strip()
+            return result.returncode == 0, stdout, stderr
         except subprocess.TimeoutExpired:
             return False, "", "Timeout ao executar comando"
         except Exception as e:
             return False, "", str(e)
+
+    def _checkout_branch(self, branch):
+        """Tenta checkout de uma branch. Se só existe no remoto, cria local tracking."""
+        ok, out, err = self._run_git(["checkout", branch])
+        if ok:
+            return True, out, err
+        # Tentar criar branch local a partir da remota
+        ok2, out2, err2 = self._run_git(["checkout", "-b", branch, f"origin/{branch}"])
+        if ok2:
+            return True, out2, err2
+        # Retornar o erro original
+        return False, out, err
 
     def _start_merge(self):
         """Inicia o processo de merge em thread separada."""
@@ -674,28 +794,17 @@ class GitMergeTool:
         self._log(f"  INICIANDO MERGE: {source} -> {len(targets)} branches\n", "header")
         self._log("=" * 60 + "\n\n", "header")
 
-        # 1. Fetch
-        self._log("[1/3] Fazendo git fetch --all...\n", "info")
-        ok, out, err = self._run_git(["fetch", "--all"])
-        if not ok:
-            self._log(f"  Aviso no fetch: {err}\n", "warning")
-
-        # 2. Atualizar source branch
-        self._log(f"\n[2/3] Atualizando branch de origem: {source}\n", "info")
-        ok, _, err = self._run_git(["checkout", source])
+        # 1. Checkout na source branch
+        self._log(f"[1/2] Checkout na branch de origem: {source}\n", "info")
+        ok, _, err = self._checkout_branch(source)
         if not ok:
             self._log(f"  ERRO ao checkout '{source}': {err}\n", "error")
             self._finish_merge(results)
             return
+        self._log(f"  Branch '{source}' OK\n", "success")
 
-        ok, out, err = self._run_git(["pull", "origin", source])
-        if ok:
-            self._log(f"  Branch '{source}' atualizada\n", "success")
-        else:
-            self._log(f"  Pull de '{source}': {err}\n", "warning")
-
-        # 3. Merge em cada target
-        self._log(f"\n[3/3] Iniciando merges...\n\n", "info")
+        # 2. Merge em cada target
+        self._log(f"\n[2/2] Iniciando merges...\n\n", "info")
 
         for i, target in enumerate(targets, 1):
             self._log(f"{'─' * 50}\n")
@@ -704,21 +813,13 @@ class GitMergeTool:
 
             # Checkout target
             self._log(f"  Checkout: {target}...", "info")
-            ok, _, err = self._run_git(["checkout", target])
+            ok, _, err = self._checkout_branch(target)
             if not ok:
                 self._log(f" FALHOU\n", "error")
                 self._log(f"    {err}\n", "error")
                 results["failed"].append((target, f"Checkout falhou: {err}"))
                 continue
             self._log(f" OK\n", "success")
-
-            # Pull target
-            self._log(f"  Pull: origin/{target}...", "info")
-            ok, out, err = self._run_git(["pull", "origin", target])
-            if ok:
-                self._log(f" OK\n", "success")
-            else:
-                self._log(f" aviso: {err}\n", "warning")
 
             # Merge
             self._log(f"  Merge: {source} -> {target}...", "info")
