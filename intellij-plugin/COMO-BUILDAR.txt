@@ -1,0 +1,46 @@
+=============================================
+  Git Merge Tool - Plugin IntelliJ
+=============================================
+
+OPCAO 1 - Abrir no IntelliJ e buildar:
+
+  1. Abra o IntelliJ IDEA
+  2. File -> Open -> selecione a pasta "intellij-plugin"
+  3. Aguarde o Gradle sincronizar (pode demorar na primeira vez)
+  4. No menu: Build -> Build Project
+  5. Para gerar o .zip do plugin:
+     - Abra o terminal do IntelliJ (Alt+F12)
+     - Execute: gradlew buildPlugin
+     - O plugin estara em: build/distributions/git-merge-tool-1.0.0.zip
+
+OPCAO 2 - Buildar pelo terminal:
+
+  1. Abra o terminal na pasta "intellij-plugin"
+  2. Execute: gradlew buildPlugin
+     (No Windows: gradlew.bat buildPlugin)
+  3. O plugin estara em: build/distributions/git-merge-tool-1.0.0.zip
+
+INSTALAR O PLUGIN:
+
+  1. No IntelliJ: File -> Settings -> Plugins
+  2. Clique na engrenagem (icone) -> "Install Plugin from Disk..."
+  3. Selecione o .zip gerado
+  4. Reinicie o IntelliJ
+
+COMO USAR:
+
+  1. Abra qualquer projeto Git no IntelliJ
+  2. Menu: Git -> Git Merge Tool
+     Ou atalho: Ctrl+Shift+M
+  3. Selecione a branch de origem
+  4. Marque as branches de destino
+  5. Clique em "INICIAR MERGE"
+  6. O push usa as credenciais ja configuradas no IntelliJ!
+
+VANTAGENS DO PLUGIN vs APP PYTHON:
+
+  - Integrado direto no IntelliJ (sem app externa)
+  - Usa as credenciais Git do IntelliJ (sem popup do GitLab!)
+  - Perfis salvos por projeto (no .idea/)
+  - Atalho Ctrl+Shift+M
+  - Acesso direto pelo menu Git

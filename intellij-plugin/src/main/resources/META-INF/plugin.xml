@@ -1,0 +1,31 @@
+<idea-plugin>
+    <id>com.mergetool.git-merge-tool</id>
+    <name>Git Merge Tool</name>
+    <version>1.0.0</version>
+    <vendor>Hugo</vendor>
+
+    <description><![CDATA[
+    Ferramenta para merge de uma branch de origem em múltiplas branches de destino.
+    Selecione a source, marque os targets, e faça merge + push com poucos cliques.
+    Suporta perfis salvos para Homologação, Produção, etc.
+    ]]></description>
+
+    <depends>com.intellij.modules.platform</depends>
+    <depends>Git4Idea</depends>
+
+    <extensions defaultExtensionNs="com.intellij">
+        <projectService serviceImplementation="com.mergetool.MergeToolConfig"/>
+    </extensions>
+
+    <actions>
+        <action id="GitMergeTool.Open"
+                class="com.mergetool.OpenMergeToolAction"
+                text="Git Merge Tool"
+                description="Abrir ferramenta de merge múltiplo"
+                icon="AllIcons.Vcs.Merge">
+            <add-to-group group-id="GitRepositoryActions" anchor="last"/>
+            <add-to-group group-id="VcsGroups" anchor="last"/>
+            <keyboard-shortcut keymap="$default" first-keystroke="ctrl shift M"/>
+        </action>
+    </actions>
+</idea-plugin>
