@@ -14,6 +14,7 @@ import java.awt.*
 import java.io.File
 import javax.swing.*
 import javax.swing.border.TitledBorder
+import javax.swing.JOptionPane
 
 class MergeToolDialog(private val project: Project) : DialogWrapper(project, true) {
 
@@ -28,20 +29,24 @@ class MergeToolDialog(private val project: Project) : DialogWrapper(project, tru
     private lateinit var logArea: JBTextArea
     private lateinit var statusLabel: JBLabel
     private lateinit var profileCombo: JComboBox<String>
+    private lateinit var verboseCheckbox: JBCheckBox
 
     private val targetCheckboxes = mutableMapOf<String, JBCheckBox>()
     private val config = MergeToolConfig.getInstance(project)
 
     private lateinit var git: GitRunner
+    private lateinit var mergeAction: DialogWrapperAction
+    private var mergeRunning = false
 
     init {
         title = "Git Merge Tool"
+        isModal = false  // Nao-modal: permite popups aparecerem por cima
         setSize(800, 700)
         init()
 
         val basePath = project.basePath
         if (basePath != null) {
-            git = GitRunner(File(basePath))
+            git = GitRunner(File(basePath), project)
             loadBranches()
         }
         loadLastProfile()
@@ -139,8 +144,12 @@ class MergeToolDialog(private val project: Project) : DialogWrapper(project, tru
         mainPanel.add(targetOuterPanel, BorderLayout.CENTER)
 
         // ─── Bottom: Log ───
-        val logPanel = JPanel(BorderLayout())
+        val logPanel = JPanel(BorderLayout(4, 4))
         logPanel.border = createSection("Log de Execucao")
+
+        verboseCheckbox = JBCheckBox("Log verbose (mostrar comandos git)", false)
+        logPanel.add(verboseCheckbox, BorderLayout.NORTH)
+
         logArea = JBTextArea()
         logArea.isEditable = false
         logArea.font = Font("Consolas", Font.PLAIN, 12)
@@ -155,9 +164,9 @@ class MergeToolDialog(private val project: Project) : DialogWrapper(project, tru
     }
 
     override fun createActions(): Array<Action> {
-        val mergeAction = object : DialogWrapperAction("INICIAR MERGE") {
+        mergeAction = object : DialogWrapperAction("INICIAR MERGE") {
             override fun doAction(e: java.awt.event.ActionEvent) {
-                startMerge()
+                if (!mergeRunning) startMerge()
             }
         }
         return arrayOf(mergeAction, cancelAction)
@@ -305,113 +314,304 @@ class MergeToolDialog(private val project: Project) : DialogWrapper(project, tru
         val targets = targetCheckboxes.filter { it.value.isSelected }.keys.toList()
 
         if (source.isBlank()) {
-            Messages.showWarningDialog("Selecione a branch de origem.", "Aviso")
+            JOptionPane.showMessageDialog(this.window, "Selecione a branch de origem.", "Aviso", JOptionPane.WARNING_MESSAGE)
             return
         }
         if (targets.isEmpty()) {
-            Messages.showWarningDialog("Selecione pelo menos uma branch de destino.", "Aviso")
+            JOptionPane.showMessageDialog(this.window, "Selecione pelo menos uma branch de destino.", "Aviso", JOptionPane.WARNING_MESSAGE)
             return
         }
 
         val msg = "Merge de '$source' para ${targets.size} branches:\n\n" +
                 targets.joinToString("\n") { "  -> $it" } + "\n\nDeseja continuar?"
-        if (Messages.showYesNoDialog(project, msg, "Confirmar Merge", null) != Messages.YES) return
+        val confirm = JOptionPane.showConfirmDialog(this.window, msg, "Confirmar Merge", JOptionPane.YES_NO_OPTION)
+        if (confirm != JOptionPane.YES_OPTION) return
 
+        mergeRunning = true
+        mergeAction.isEnabled = false
         logArea.text = ""
         log("=".repeat(50))
         log("INICIANDO MERGE: $source -> ${targets.size} branches")
         log("=".repeat(50))
 
         ApplicationManager.getApplication().executeOnPooledThread {
-            executeMerge(source, targets)
+            try {
+                executeMerge(source, targets)
+            } finally {
+                SwingUtilities.invokeLater {
+                    mergeRunning = false
+                    mergeAction.isEnabled = true
+                }
+            }
         }
     }
 
     private fun executeMerge(source: String, targets: List<String>) {
+        // Configurar verbose
+        val verbose = verboseCheckbox.isSelected
+        git.onVerbose = if (verbose) { msg -> log(msg) } else null
+
         val successes = mutableListOf<String>()
         val failures = mutableListOf<Pair<String, String>>()
 
+        log("Diretorio: ${project.basePath}")
+        log("Verbose: ${if (verbose) "SIM" else "NAO"}")
+        log("")
+
         // 1. Checkout source
-        log("\n[1/2] Checkout: $source")
+        log(">> Checkout na branch de origem: $source")
         val srcResult = git.checkout(source)
         if (!srcResult.success) {
-            log("  ERRO: ${srcResult.stderr}")
+            log("ERRO ao fazer checkout em '$source': ${srcResult.stderr}")
+            log("Verifique se a branch existe e se o repositorio esta acessivel.")
             showResult(successes, failures)
             return
         }
-        log("  OK")
+        log("OK - branch de origem '$source' ativa")
 
         // 2. Merge em cada target
-        log("\n[2/2] Iniciando merges...\n")
+        log("")
+        log("Iniciando merge em ${targets.size} branch(es)...")
+        log("")
 
         for ((i, target) in targets.withIndex()) {
-            log("-".repeat(40))
-            log("  [${i + 1}/${targets.size}] $source -> $target")
+            log("=" .repeat(50))
+            log("[${i + 1}/${targets.size}] Processando: $target")
+            log("=" .repeat(50))
 
             // Checkout target
-            log("  Checkout: $target...")
+            log(">> git checkout $target")
             val coResult = git.checkout(target)
             if (!coResult.success) {
-                log("    FALHOU: ${coResult.stderr}")
-                failures.add(target to "Checkout falhou")
+                log("ERRO checkout: ${coResult.stderr}")
+                failures.add(target to "Checkout falhou: ${coResult.stderr.take(100)}")
+                log("")
                 continue
             }
-            log("    OK")
+            log("OK - na branch '$target'")
 
             // Merge
-            log("  Merge: $source -> $target...")
+            log(">> git merge $source --no-edit")
             val mergeResult = git.merge(source)
 
             if (mergeResult.success) {
-                log("    SUCESSO")
-
-                // Perguntar push
-                val doPush = askOnEdt("Merge em '$target' OK!\n\nFazer push para origin/$target?")
-                if (doPush) {
-                    log("  Push: origin/$target...")
-                    val pushResult = git.push(target)
-                    if (pushResult.success) {
-                        log("    Push OK")
-                        successes.add(target)
-                    } else {
-                        log("    Push FALHOU: ${pushResult.stderr}")
-                        failures.add(target to "Push falhou")
-                    }
+                if ("Already up to date" in mergeResult.stdout) {
+                    log("Ja esta atualizado - nada a fazer")
+                    successes.add("$target (ja atualizado)")
                 } else {
-                    log("  Push ignorado")
-                    successes.add("$target (sem push)")
+                    log("MERGE OK - sem conflitos")
+                    handlePushAfterMerge(target, successes, failures)
                 }
             } else {
                 val combined = "${mergeResult.stdout} ${mergeResult.stderr}"
+                log("Merge retornou erro. stdout: ${mergeResult.stdout.take(200)}")
+                log("Merge retornou erro. stderr: ${mergeResult.stderr.take(200)}")
                 if ("CONFLICT" in combined.uppercase()) {
-                    log("    CONFLITO detectado! Abortando...")
-                    git.mergeAbort()
-                    failures.add(target to "Conflitos de merge")
+                    val conflictFiles = git.getConflictFiles()
+                    log("CONFLITO detectado em ${conflictFiles.size} arquivo(s):")
+                    conflictFiles.forEach { log("  >> $it") }
+
+                    val choice = askConflictChoice(target, conflictFiles)
+
+                    log("Usuario escolheu: ${choice.name}")
+                    when (choice) {
+                        ConflictChoice.KEEP_DEST -> {
+                            // --ours = manter o codigo da branch atual (destino)
+                            log(">> git checkout --ours (mantendo codigo de '$target')")
+                            val oursResult = git.checkoutOurs(conflictFiles)
+                            if (oursResult.success) {
+                                log(">> git add (marcando conflitos como resolvidos)")
+                                git.addFiles(conflictFiles)
+                                log(">> git commit --no-edit")
+                                val commitResult = git.commitMerge()
+                                if (commitResult.success) {
+                                    log("OK - conflitos resolvidos mantendo codigo do DESTINO")
+                                    handlePushAfterMerge(target, successes, failures)
+                                } else {
+                                    log("COMMIT FALHOU: ${commitResult.stderr}")
+                                    git.mergeAbort()
+                                    failures.add(target to "Commit falhou apos checkout --ours")
+                                }
+                            } else {
+                                log("ERRO checkout --ours: ${oursResult.stderr}")
+                                git.mergeAbort()
+                                failures.add(target to "checkout --ours falhou")
+                            }
+                        }
+                        ConflictChoice.ACCEPT_SOURCE -> {
+                            // --theirs = aceitar o codigo da branch source (origem)
+                            log(">> git checkout --theirs (aceitando codigo de '$source')")
+                            val theirsResult = git.checkoutTheirs(conflictFiles)
+                            if (theirsResult.success) {
+                                log(">> git add (marcando conflitos como resolvidos)")
+                                git.addFiles(conflictFiles)
+                                log(">> git commit --no-edit")
+                                val commitResult = git.commitMerge()
+                                if (commitResult.success) {
+                                    log("OK - conflitos resolvidos aceitando codigo da ORIGEM")
+                                    handlePushAfterMerge(target, successes, failures)
+                                } else {
+                                    log("COMMIT FALHOU: ${commitResult.stderr}")
+                                    git.mergeAbort()
+                                    failures.add(target to "Commit falhou apos checkout --theirs")
+                                }
+                            } else {
+                                log("ERRO checkout --theirs: ${theirsResult.stderr}")
+                                git.mergeAbort()
+                                failures.add(target to "checkout --theirs falhou")
+                            }
+                        }
+                        ConflictChoice.RESOLVE -> {
+                            // Abrir arquivos no IDE para resolucao manual
+                            openConflictFiles(conflictFiles)
+                            log("Arquivos abertos no editor. Aguardando resolucao manual...")
+                            val resolved = askOnEdt(
+                                "Resolva os conflitos no IDE e clique SIM quando terminar.\n\n" +
+                                "Arquivos com conflito:\n" +
+                                conflictFiles.joinToString("\n") { "  - $it" } +
+                                "\n\nConflitos resolvidos?"
+                            )
+                            if (resolved) {
+                                log(">> git add -A")
+                                git.addAll()
+                                log(">> git commit --no-edit")
+                                val commitResult = git.commitMerge()
+                                if (commitResult.success) {
+                                    log("COMMIT OK - conflitos resolvidos manualmente")
+                                    handlePushAfterMerge(target, successes, failures)
+                                } else {
+                                    log("COMMIT FALHOU: ${commitResult.stderr}")
+                                    log("Ainda ha conflitos nao resolvidos. Abortando merge...")
+                                    git.mergeAbort()
+                                    failures.add(target to "Conflitos nao resolvidos")
+                                }
+                            } else {
+                                log("Cancelado pelo usuario. Abortando merge...")
+                                git.mergeAbort()
+                                failures.add(target to "Conflitos - cancelado pelo usuario")
+                            }
+                        }
+                        ConflictChoice.SKIP -> {
+                            log("Pulando branch '$target'. Abortando merge nesta branch...")
+                            git.mergeAbort()
+                            failures.add(target to "Conflitos - pulado pelo usuario")
+                        }
+                        ConflictChoice.STOP -> {
+                            log("PARANDO toda a execucao por solicitacao do usuario.")
+                            git.mergeAbort()
+                            failures.add(target to "Conflitos - execucao parada")
+                            break
+                        }
+                    }
                 } else {
-                    log("    ERRO: ${mergeResult.stderr}")
+                    log("ERRO desconhecido no merge: ${mergeResult.stderr}")
                     git.mergeAbort()
-                    failures.add(target to mergeResult.stderr.take(80))
+                    failures.add(target to "Erro: ${mergeResult.stderr.take(100)}")
                 }
             }
             log("")
         }
 
         // Voltar para source
-        log("Voltando para: $source")
+        log(">> Retornando para branch de origem: $source")
         git.checkout(source)
+        log("OK - de volta em '$source'")
 
         showResult(successes, failures)
     }
 
+    private fun handlePushAfterMerge(
+        target: String,
+        successes: MutableList<String>,
+        failures: MutableList<Pair<String, String>>
+    ) {
+        val doPush = askOnEdt("Merge em '$target' concluido!\n\nFazer push para origin/$target?")
+        if (doPush) {
+            log(">> git push origin $target")
+            val pushResult = git.push(target)
+            if (pushResult.success) {
+                log("PUSH OK")
+                successes.add(target)
+            } else {
+                log("PUSH FALHOU: ${pushResult.stderr}")
+                failures.add(target to "Push falhou: ${pushResult.stderr.take(100)}")
+            }
+        } else {
+            log("Push ignorado pelo usuario")
+            successes.add("$target (sem push)")
+        }
+    }
+
+    private enum class ConflictChoice { KEEP_DEST, ACCEPT_SOURCE, RESOLVE, SKIP, STOP }
+
+    private fun askConflictChoice(branch: String, files: List<String>): ConflictChoice {
+        val parentWindow = this.window
+        var choice = ConflictChoice.SKIP
+        ApplicationManager.getApplication().invokeAndWait {
+            val fileList = files.joinToString("\n") { "  - $it" }
+            val options = arrayOf(
+                "Manter DESTINO ($branch)",
+                "Aceitar ORIGEM (source)",
+                "Resolver no IDE",
+                "Pular esta branch",
+                "Parar tudo"
+            )
+            val result = JOptionPane.showOptionDialog(
+                parentWindow,
+                "Conflitos detectados ao mergear em '$branch':\n\n$fileList\n\n" +
+                "Manter DESTINO = fica o codigo que ja esta em '$branch'\n" +
+                "Aceitar ORIGEM = substitui pelo codigo da branch source\n\n" +
+                "O que deseja fazer?",
+                "Conflito de Merge",
+                JOptionPane.DEFAULT_OPTION,
+                JOptionPane.WARNING_MESSAGE,
+                null,
+                options,
+                options[0]
+            )
+            choice = when (result) {
+                0 -> ConflictChoice.KEEP_DEST
+                1 -> ConflictChoice.ACCEPT_SOURCE
+                2 -> ConflictChoice.RESOLVE
+                3 -> ConflictChoice.SKIP
+                else -> ConflictChoice.STOP
+            }
+        }
+        return choice
+    }
+
+    private fun openConflictFiles(files: List<String>) {
+        ApplicationManager.getApplication().invokeLater {
+            val basePath = project.basePath ?: return@invokeLater
+            for (filePath in files) {
+                val vFile = com.intellij.openapi.vfs.LocalFileSystem.getInstance()
+                    .refreshAndFindFileByPath("$basePath/$filePath")
+                if (vFile != null) {
+                    com.intellij.openapi.fileEditor.FileEditorManager
+                        .getInstance(project).openFile(vFile, true)
+                }
+            }
+        }
+    }
+
     private fun askOnEdt(message: String): Boolean {
+        val parentWindow = this.window
         var result = false
         ApplicationManager.getApplication().invokeAndWait {
-            result = Messages.showYesNoDialog(project, message, "Push", null) == Messages.YES
+            val answer = JOptionPane.showConfirmDialog(
+                parentWindow,
+                message,
+                "Confirmar",
+                JOptionPane.YES_NO_OPTION,
+                JOptionPane.QUESTION_MESSAGE
+            )
+            result = answer == JOptionPane.YES_OPTION
         }
         return result
     }
 
     private fun showResult(successes: List<String>, failures: List<Pair<String, String>>) {
+        val parentWindow = this.window
         ApplicationManager.getApplication().invokeLater {
             log("\n" + "=".repeat(50))
             log("RESUMO FINAL")
@@ -428,18 +628,30 @@ class MergeToolDialog(private val project: Project) : DialogWrapper(project, tru
             log("\nTotal: ${successes.size}/$total branches mergeadas com sucesso")
 
             if (failures.isEmpty()) {
-                Messages.showInfoMessage(project, "Todas as $total branches mergeadas!", "Concluido")
+                JOptionPane.showMessageDialog(
+                    parentWindow, "Todas as $total branches mergeadas!", "Concluido", JOptionPane.INFORMATION_MESSAGE)
             } else {
-                Messages.showWarningDialog(project,
-                    "${successes.size}/$total sucesso, ${failures.size} falhas.\nVerifique o log.", "Concluido")
+                JOptionPane.showMessageDialog(
+                    parentWindow,
+                    "${successes.size}/$total sucesso, ${failures.size} falhas.\nVerifique o log.",
+                    "Concluido", JOptionPane.WARNING_MESSAGE)
             }
         }
     }
 
     private fun log(msg: String) {
-        ApplicationManager.getApplication().invokeLater {
-            logArea.append("$msg\n")
+        val timestamp = java.time.LocalTime.now().format(java.time.format.DateTimeFormatter.ofPattern("HH:mm:ss"))
+        val line = "[$timestamp] $msg\n"
+        if (SwingUtilities.isEventDispatchThread()) {
+            logArea.append(line)
             logArea.caretPosition = logArea.document.length
+        } else {
+            SwingUtilities.invokeLater {
+                logArea.append(line)
+                logArea.caretPosition = logArea.document.length
+            }
+            // Pequena pausa para dar tempo da UI atualizar
+            Thread.sleep(50)
         }
     }
 }
