@@ -1,0 +1,35 @@
+=============================================
+  Git Merge Tool - Instrucoes de Uso
+=============================================
+
+OPCAO 1 - Rodar direto com Python:
+  python git_merge_tool.py
+
+OPCAO 2 - Criar um .exe (duplo clique):
+  1. Coloque os dois arquivos na mesma pasta
+  2. Dê duplo clique em "criar_exe.bat"
+  3. Aguarde (pode levar 1-2 minutos)
+  4. O executável estará em: dist\GitMergeTool.exe
+  5. Copie o .exe para onde quiser!
+
+REQUISITOS:
+  - Python 3.8+ (apenas para gerar o .exe)
+  - Git instalado e no PATH
+  - Depois de gerar o .exe, não precisa mais de Python
+
+COMO USAR:
+  1. Abra a ferramenta
+  2. Clique em "Procurar..." e selecione a pasta do repositorio Git
+  3. Clique em "Atualizar Branches" para carregar todas as branches
+  4. Selecione a branch de ORIGEM (ex: homologacao_merge)
+  5. Marque as branches de DESTINO nos checkboxes
+     - Use o campo "Filtrar" para buscar branches
+     - Use "Carregar do Perfil" para marcar as branches salvas
+  6. Clique em "INICIAR MERGE"
+  7. Para cada branch, a ferramenta pergunta se quer fazer push
+
+PERFIS:
+  - Perfis salvam a branch de origem + branches de destino selecionadas
+  - Crie perfis para cada ambiente (Homologacao, Producao, etc.)
+  - Clique em "Salvar" para gravar as selecoes atuais no perfil
+  - As configuracoes ficam em: %USERPROFILE%\.git_merge_tool.json
