@@ -13,8 +13,12 @@ repositories {
 
 intellij {
     version.set("2024.1")
-    type.set("IC") // IntelliJ Community Edition
-    plugins.set(listOf("git4idea"))
+    type.set("IC")
+}
+
+java {
+    sourceCompatibility = JavaVersion.VERSION_17
+    targetCompatibility = JavaVersion.VERSION_17
 }
 
 tasks {

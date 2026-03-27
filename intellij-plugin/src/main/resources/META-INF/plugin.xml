@@ -2,30 +2,72 @@
     <id>com.mergetool.git-merge-tool</id>
     <name>Git Merge Tool</name>
     <version>1.0.0</version>
-    <vendor>Hugo</vendor>
+    <vendor email="hugohomesquita@gmail.com" url="https://github.com/hugohomesquita">Hugo Homesquita</vendor>
 
     <description><![CDATA[
-    Ferramenta para merge de uma branch de origem em múltiplas branches de destino.
-    Selecione a source, marque os targets, e faça merge + push com poucos cliques.
-    Suporta perfis salvos para Homologação, Produção, etc.
+    <h2>Git Merge Tool</h2>
+    <p>Merge one source branch into multiple target branches with just a few clicks.</p>
+
+    <h3>Features</h3>
+    <ul>
+        <li><b>Multi-branch merge</b> — select a source branch and merge into multiple targets at once</li>
+        <li><b>Branch search/filter</b> — quickly find branches by typing</li>
+        <li><b>Saved profiles</b> — save source + target configurations (e.g., "Staging", "Production")</li>
+        <li><b>Push confirmation</b> — asks before pushing each merged branch</li>
+        <li><b>Conflict detection</b> — automatically aborts and reports conflicts</li>
+        <li><b>Execution log</b> — detailed log of all git operations</li>
+    </ul>
+
+    <h3>Usage</h3>
+    <ol>
+        <li>Open any Git project</li>
+        <li>Go to <b>Tools > Git Merge Tool > Abrir Merge Tool</b> or press <b>Ctrl+Shift+M</b></li>
+        <li>Select the source branch</li>
+        <li>Check the target branches</li>
+        <li>Click "INICIAR MERGE"</li>
+    </ol>
+
+    <p>Perfect for teams that maintain multiple environment branches (staging, production, feature branches) and need to propagate changes quickly.</p>
     ]]></description>
 
+    <change-notes><![CDATA[
+    <h3>1.0.0</h3>
+    <ul>
+        <li>Initial release</li>
+        <li>Multi-branch merge with source/target selection</li>
+        <li>Branch search and filtering</li>
+        <li>Profile management (save/load/delete)</li>
+        <li>Push confirmation after each merge</li>
+        <li>Conflict detection and auto-abort</li>
+    </ul>
+    ]]></change-notes>
+
     <depends>com.intellij.modules.platform</depends>
-    <depends>Git4Idea</depends>
 
     <extensions defaultExtensionNs="com.intellij">
         <projectService serviceImplementation="com.mergetool.MergeToolConfig"/>
     </extensions>
 
     <actions>
-        <action id="GitMergeTool.Open"
+        <group id="GitMergeTool.Group" text="Git Merge Tool" popup="true"
+               icon="AllIcons.Vcs.Merge">
+            <add-to-group group-id="ToolsMenu" anchor="last"/>
+            <action id="GitMergeTool.Open"
+                    class="com.mergetool.OpenMergeToolAction"
+                    text="Abrir Merge Tool"
+                    description="Abrir ferramenta de merge multiplo"
+                    icon="AllIcons.Vcs.Merge">
+                <keyboard-shortcut keymap="$default" first-keystroke="ctrl shift M"/>
+            </action>
+        </group>
+
+        <action id="GitMergeTool.OpenDirect"
                 class="com.mergetool.OpenMergeToolAction"
                 text="Git Merge Tool"
-                description="Abrir ferramenta de merge múltiplo"
+                description="Abrir ferramenta de merge multiplo"
                 icon="AllIcons.Vcs.Merge">
-            <add-to-group group-id="GitRepositoryActions" anchor="last"/>
             <add-to-group group-id="VcsGroups" anchor="last"/>
-            <keyboard-shortcut keymap="$default" first-keystroke="ctrl shift M"/>
+            <add-to-group group-id="VcsGeneral.KeymapGroup" anchor="last"/>
         </action>
     </actions>
 </idea-plugin>
